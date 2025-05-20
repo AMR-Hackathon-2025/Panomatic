@@ -1,0 +1,4 @@
+#run_name: "NDM1"
+#infile: "../data/2025_05_19_blandm_1.tsv"
+run_name: "NDM1"
+infile: "../data/testing/test_blandm1.tsv"

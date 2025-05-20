@@ -1,0 +1,120 @@
+import pandas as pd
+configfile: "NDM_config.yaml"
+
+
+# Read unique values from the first column of the CSV
+SAMPLES = pd.read_csv(config["infile"], header=None,sep="\t")[0].unique().tolist()
+AMR = pd.read_csv(config["infile"],header=None,sep="\t")
+
+# Define the expected output files for each sample
+rule all:
+    input:
+        expand("../results/{run_name}/fasta/{sample}.fa.gz",sample=SAMPLES,run_name=config["run_name"]),
+        expand("../results/{run_name}/txt/{sample}_clist.txt",sample=SAMPLES,run_name=config["run_name"]),
+        expand("../results/{run_name}/done/{sample}_prokka.done",sample=SAMPLES,run_name=config["run_name"]),
+        expand("../results/{run_name}/done/{sample}_plasmidCC.done",sample=SAMPLES,run_name=config["run_name"]),
+        expand("../results/{run_name}/filtfasta/{sample}_{run_name}_AMR.fasta",sample=SAMPLES,run_name=config["run_name"]),
+        #"installed_bakta.done"
+
+
+
+rule download_fasta:
+    params:
+        samplename=lambda wildcards:wildcards.sample
+    output:
+        "../results/{run_name}/fasta/{sample}.fa.gz"
+    shell:
+        """
+        curl https://allthebacteria-assemblies.s3.eu-west-2.amazonaws.com/{params.samplename}.fa.gz -o {output[0]}
+        """
+   
+
+rule make_listfiles:
+    input:
+        "../results/{run_name}/fasta/{sample}.fa.gz"
+    params:
+        samplename=lambda wildcards:wildcards.sample
+    output:
+        "../results/{run_name}/txt/{sample}_clist.txt"
+    run:
+        contigs = AMR[AMR[0] == params.samplename][2]
+        print(contigs)
+        with open(output[0], "w") as f:
+            f.write("\n".join(contigs))
+        
+
+rule extract_contigs:
+    input:
+        fasta="../results/{run_name}/fasta/{sample}.fa.gz",
+        inlist="../results/{run_name}/txt/{sample}_clist.txt"
+    output:
+        "../results/{run_name}/filtfasta/{sample}_{run_name}_AMR.fasta"
+    shell:
+        """
+        faSomeRecords {input.fasta} {input.inlist} {output[0]}
+        """
+
+rule prokka:
+    input:
+        "../results/{run_name}/filtfasta/{sample}_{run_name}_AMR.fasta"
+    output:
+        directory("../results/{run_name}/prokka/{sample}/"),
+        done="../results/{run_name}/done/{sample}_prokka.done"
+    conda:
+        "prokka.yaml"
+    shell:
+        """
+        prokka --outdir {output[0]} {input[0]}
+        touch {output.done}
+        """
+
+rule rename_contigs:
+    input:
+        "../results/{run_name}/filtfasta/{sample}_{run_name}_AMR.fasta"
+    output:
+        "../results/{run_name}/filtfasta/{sample}_{run_name}_renamed_AMR.fasta"
+    shell:
+        """
+        cat {input[0]} | sed 's/ /_/g' > {output[0]}
+        """
+
+
+rule plasmidCC:
+    input:
+        "../results/{run_name}/filtfasta/{sample}_{run_name}_renamed_AMR.fasta"
+    output:
+        directory("../results/{run_name}/plasmidCC/{sample}_plasmids"),
+        "../results/{run_name}/done/{sample}_plasmidCC.done"
+    shell:
+        """
+        mkdir -p {output[0]} 
+        plasmidCC -i {input[0]} -s "Klebsiella_pneumoniae" -l 3000 -o {output[0]}
+        touch {output[1]}
+        """ 
+
+#rule install_bakta:
+#    conda:
+#        "bakta.yaml"
+#    output: "installed_bakta.done"
+#    shell:
+#        """
+#        bakta_db install -i /home/jovyan/shared-team/pvh/bakta/db.tar.xz 
+#        touch {output[0]}
+#        """
+#rule run_bakta:
+#    input:
+#        ffasta="../results/{run_name}/filtfasta/{sample}_{run_name}_AMR.fasta"
+#    output:
+#        directory("../results/{run_name}/bakta/{sample}/"),
+#        done="../results/{run_name}/done/{sample}_bakta.done"
+#    params:
+#        dbdir="/home/jovyan/shared-team/bakrep_glass/src/db"
+#    conda:
+#        "bakta.yaml"
+#    shell:
+#        """
+#        bakta --db {params.dbdir} --output {output[0]} --min-contig-length 3000 --genus Klebsiella --species pneumoniae --keep-contig-headers --threads 2 {input.ffasta}
+#        touch {output.done}
+#        """
+
+
